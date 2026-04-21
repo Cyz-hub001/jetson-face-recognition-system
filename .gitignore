@@ -2,23 +2,32 @@
 __pycache__/
 *.py[cod]
 *.pyo
+*$py.class
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 build/
 dist/
 *.egg-info/
+*.egg
 
 # Local virtual environments
 .conda/
 .venv/
 venv/
 env/
+ENV/
+__pypackages__/
 
-# Runtime logs
+# Runtime logs and local databases
 logs/
 face_door_system/logs/
 *.log
+db.sqlite3
+db.sqlite3-journal
 
 # Local/private face image dataset
 人脸图片保存/
@@ -35,9 +44,22 @@ models/
 # Local environment/config secrets
 .env
 .env.*
+.envrc
 *.pem
 *.key
 
-# OS/editor noise
+# Tool/editor noise
 .DS_Store
 Thumbs.db
+.cache/
+.tox/
+.nox/
+.hypothesis/
+.ipynb_checkpoints/
+.pyre/
+.pytype/
+.pdm-python
+.pdm-build/
+.pixi/
+.cursorignore
+.cursorindexingignore
