@@ -1,0 +1,52 @@
+{
+  "system": {
+    "owner_name": "pyy02",
+    "window_name": "Face Door System"
+  },
+
+  "recognition": {
+    "threshold": 0.42,
+    "open_score": 5,
+    "cooldown_seconds": 3.0,
+    "frame_skip": 2,
+    "det_size": [320, 320],
+    "print_unknown": false,
+    "show_fps_every": 5.0
+  },
+
+  "paths": {
+    "known_faces_dir": "../人脸图片保存",
+    "trt_cache_dir": "~/.cache/insightface_trt",
+    "insightface_model_root": "../models/insightface"
+  },
+
+  "serial": {
+    "enabled": true,
+    "port": "/dev/ttyUSB0",
+    "baudrate": 9600,
+    "timeout": 1,
+    "open_command": "OPEN\n"
+  },
+
+  "camera": {
+    "sensor_id": 0,
+    "width": 640,
+    "height": 480,
+    "fps": 30,
+    "backend": "auto",
+    "flip_method": 0
+  },
+
+  "logging": {
+    "log_dir": "logs",
+    "system_log_file": "system.log",
+    "access_log_file": "access.log",
+    "level": "INFO"
+  },
+
+  "web": {
+    "allow_manual_open": true,
+    "manual_open_local_only": true,
+    "auto_start_recognition": false
+  }
+}

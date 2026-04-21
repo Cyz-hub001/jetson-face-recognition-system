@@ -1,0 +1,43 @@
+# Python cache/build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Local virtual environments
+.conda/
+.venv/
+venv/
+env/
+
+# Runtime logs
+logs/
+face_door_system/logs/
+*.log
+
+# Local/private face image dataset
+人脸图片保存/
+known_faces/
+
+# Downloaded model weights/cache
+models/
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.zip
+
+# Local environment/config secrets
+.env
+.env.*
+*.pem
+*.key
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
