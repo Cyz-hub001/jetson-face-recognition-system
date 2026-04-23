@@ -28,6 +28,8 @@ class RecognitionEngine:
         camera_fps: int,
         camera_backend: str,
         camera_flip_method: int,
+        camera_capture_width: int,
+        camera_capture_height: int,
         det_size: tuple,
         model_root: str,
         logger=None
@@ -39,6 +41,8 @@ class RecognitionEngine:
         self.camera_fps = camera_fps
         self.camera_backend = camera_backend
         self.camera_flip_method = camera_flip_method
+        self.camera_capture_width = camera_capture_width
+        self.camera_capture_height = camera_capture_height
         self.det_size = tuple(det_size)
         self.model_root = Path(os.path.expanduser(model_root))
         self.logger = logger
@@ -176,11 +180,12 @@ class RecognitionEngine:
     def _csi_gstreamer_pipeline(self) -> str:
         return (
             f"nvarguscamerasrc sensor-id={self.camera_sensor_id} ! "
-            f"video/x-raw(memory:NVMM), width=(int){self.camera_width}, "
-            f"height=(int){self.camera_height}, "
+            f"video/x-raw(memory:NVMM), width=(int){self.camera_capture_width}, "
+            f"height=(int){self.camera_capture_height}, "
             f"framerate=(fraction){self.camera_fps}/1 ! "
             f"nvvidconv flip-method={self.camera_flip_method} ! "
-            "video/x-raw, format=(string)BGRx ! "
+            f"video/x-raw, width=(int){self.camera_width}, "
+            f"height=(int){self.camera_height}, format=(string)BGRx ! "
             "videoconvert ! "
             "video/x-raw, format=(string)BGR ! "
             "appsink drop=true sync=false max-buffers=1"

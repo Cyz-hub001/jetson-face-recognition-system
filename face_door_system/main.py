@@ -83,6 +83,8 @@ class FaceDoorSystem:
             camera_fps=self.camera_fps,
             camera_backend=camera_cfg.get("backend", "auto"),
             camera_flip_method=self.camera_flip_method,
+            camera_capture_width=camera_cfg.get("capture_width", 1280),
+            camera_capture_height=camera_cfg.get("capture_height", 720),
             det_size=tuple(self.det_size),
             model_root=self.insightface_model_root,
             logger=self.logger

@@ -32,6 +32,8 @@
     "sensor_id": 0,
     "width": 640,
     "height": 480,
+    "capture_width": 1280,
+    "capture_height": 720,
     "fps": 30,
     "backend": "csi",
     "flip_method": 0
