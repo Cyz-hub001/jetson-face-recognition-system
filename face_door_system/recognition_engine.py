@@ -15,12 +15,6 @@ if cv2 is not None:
     if not hasattr(cv2, "INTER_LINEAR_EXACT"):
         cv2.INTER_LINEAR_EXACT = cv2.INTER_LINEAR
 
-try:
-    from insightface.app import FaceAnalysis
-except ImportError:
-    FaceAnalysis = None
-
-
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
@@ -64,10 +58,6 @@ class RecognitionEngine:
 
         if cv2 is None:
             self._error("OpenCV is not installed.")
-            return False
-
-        if FaceAnalysis is None:
-            self._error("insightface is not installed.")
             return False
 
         self.capture = self._open_camera()
@@ -130,6 +120,11 @@ class RecognitionEngine:
     def _prepare_model(self) -> None:
         if self.app is not None:
             return
+
+        try:
+            from insightface.app import FaceAnalysis
+        except ImportError as e:
+            raise RuntimeError("insightface is not installed") from e
 
         self.model_root.mkdir(parents=True, exist_ok=True)
         self.app = FaceAnalysis(name="buffalo_l", root=str(self.model_root))
