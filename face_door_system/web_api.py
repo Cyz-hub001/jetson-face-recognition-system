@@ -24,6 +24,7 @@ class StatusResponse(BaseModel):
     current_person: Optional[str] = None
     score_count: int
     last_similarity: float
+    recent_recognition: Optional[dict] = None
     in_cooldown: bool
     cooldown_remaining: float
     owner_name: str
@@ -32,6 +33,7 @@ class StatusResponse(BaseModel):
     serial_enabled: bool
     serial_connected: bool
     camera_running: bool
+    recognition_running: bool
 
 
 class HealthResponse(BaseModel):
@@ -39,6 +41,7 @@ class HealthResponse(BaseModel):
     serial_available: bool
     serial_enabled: bool
     camera_running: bool
+    recognition_running: bool
     state: str
     service_time: str
 

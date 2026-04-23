@@ -6,7 +6,7 @@ from typing import Optional, Tuple
 from access_log import AccessLogger
 from logger_setup import setup_logger
 from recognition_engine import RecognitionEngine
-from serial_comm import SerialManager
+from serial_comm import SerialErrorCode, SerialManager
 from state_machine import StateMachine, SystemState
 
 
@@ -29,12 +29,16 @@ class FaceDoorSystem:
         self.logger = setup_logger(
             log_dir=log_cfg["log_dir"],
             log_file=log_cfg["system_log_file"],
-            level=log_cfg["level"]
+            level=log_cfg["level"],
+            max_bytes=log_cfg.get("max_bytes", 2 * 1024 * 1024),
+            backup_count=log_cfg.get("backup_count", 5)
         )
 
         self.access_logger = AccessLogger(
             log_dir=log_cfg["log_dir"],
-            log_file=log_cfg["access_log_file"]
+            log_file=log_cfg["access_log_file"],
+            max_bytes=log_cfg.get("max_bytes", 2 * 1024 * 1024),
+            backup_count=log_cfg.get("backup_count", 5)
         )
 
         self.owner_name = system_cfg["owner_name"]
@@ -99,11 +103,21 @@ class FaceDoorSystem:
     def last_similarity(self) -> float:
         return self.state_machine.last_similarity
 
+    def refresh_state(self) -> None:
+        self.state_machine.refresh_cooldown(time.time())
+
     def is_in_cooldown(self) -> bool:
-        return self.state_machine.is_in_cooldown(time.time())
+        now = time.time()
+        if self.state_machine.is_in_cooldown(now):
+            return True
+
+        self.state_machine.refresh_cooldown(now)
+        return False
 
     def get_status_snapshot(self) -> dict:
-        return self.state_machine.get_status_snapshot(time.time())
+        now = time.time()
+        self.state_machine.refresh_cooldown(now)
+        return self.state_machine.get_status_snapshot(now)
 
     def enter_cooldown(self, reason: str = "open_success") -> None:
         now = time.time()
@@ -126,6 +140,7 @@ class FaceDoorSystem:
         self.logger.info("System initialized successfully")
 
     def process_recognition_result(self, best_name: str, best_score: float) -> None:
+        self.refresh_state()
         self.state_machine.record_recognition(best_name, best_score)
 
         self.logger.info(
@@ -136,7 +151,9 @@ class FaceDoorSystem:
             event_type="recognize",
             person_name=best_name,
             similarity=round(best_score, 3),
-            result="candidate"
+            result="candidate",
+            state_to=self.state_machine.state,
+            source="face_recognition"
         )
 
         if self.is_in_cooldown():
@@ -152,15 +169,15 @@ class FaceDoorSystem:
                 event_type="cooldown",
                 person_name=best_name,
                 similarity=round(best_score, 3),
-                result="blocked"
+                result="blocked",
+                state_to=self.state_machine.state,
+                failure_reason={
+                    "code": "COOLDOWN_ACTIVE",
+                    "message": "Recognition blocked while door is cooling down"
+                },
+                source="face_recognition"
             )
             return
-
-        if self.state_machine.state == SystemState.COOLDOWN:
-            self.state_machine.leave_cooldown(
-                reason="cooldown_expired",
-                now=time.time()
-            )
 
         if best_score >= self.threshold:
             if self.state_machine.state == SystemState.WAITING:
@@ -209,7 +226,14 @@ class FaceDoorSystem:
             event_type="deny",
             person_name=best_name,
             similarity=round(best_score, 3),
-            result="denied"
+            result="denied",
+            state_from=self.state_machine.state,
+            state_to=SystemState.WAITING,
+            failure_reason={
+                "code": "SIMILARITY_BELOW_THRESHOLD",
+                "message": "Similarity is below configured threshold"
+            },
+            source="face_recognition"
         )
 
         self.state_machine.reset_matching(
@@ -242,26 +266,37 @@ class FaceDoorSystem:
             event_type="confirm",
             person_name=best_name,
             similarity=round(best_score, 3),
-            result="confirmed"
+            result="confirmed",
+            state_to=self.state_machine.state,
+            source="face_recognition"
         )
 
         self.handle_open(best_name, best_score)
 
     def handle_open(self, best_name: str, best_score: float) -> None:
         self.logger.info("Sending OPEN command")
-        send_ok = self.serial_manager.send_command(self.open_command)
+        send_result = self.serial_manager.send_command(self.open_command)
+        send_ok = send_result.get("ok", False)
+        failure_reason = None if send_ok else self.get_serial_failure_reason(
+            send_result
+        )
 
         self.access_logger.write_event(
             event_type="serial_send",
             person_name=best_name,
             similarity=round(best_score, 3),
             result="sent" if send_ok else "failed",
+            door_result="command_sent" if send_ok else "command_failed",
+            failure_reason=failure_reason,
+            source="face_recognition",
             extra={
                 "command": self.open_command.strip(),
-                "reason": None if send_ok else {
-                    "code": "SERIAL_NOT_AVAILABLE",
-                    "message": "pyserial not installed or serial not available"
-                }
+                "failure_reason": (
+                    failure_reason.get("code") if failure_reason else None
+                ),
+                "message": (
+                    failure_reason.get("message") if failure_reason else None
+                )
             }
         )
 
@@ -276,7 +311,9 @@ class FaceDoorSystem:
                 person_name=best_name,
                 similarity=round(best_score, 3),
                 result="success",
-                extra={"source": "face_recognition"}
+                state_to=self.state_machine.state,
+                door_result="opened",
+                source="face_recognition"
             )
 
             self.state_machine.clear_match_context()
@@ -287,7 +324,12 @@ class FaceDoorSystem:
                 event_type="open",
                 person_name=best_name,
                 similarity=round(best_score, 3),
-                result="failed"
+                result="failed",
+                state_from=self.state_machine.state,
+                state_to=SystemState.WAITING,
+                door_result="open_failed",
+                failure_reason=failure_reason,
+                source="face_recognition"
             )
             self.state_machine.reset_matching(
                 reason="serial_send_failed",
@@ -302,6 +344,13 @@ class FaceDoorSystem:
                 person_name="admin",
                 similarity=0.0,
                 result="blocked",
+                state_to=self.state_machine.state,
+                door_result="blocked",
+                failure_reason={
+                    "code": "COOLDOWN_ACTIVE",
+                    "message": "System in cooldown"
+                },
+                source=source,
                 extra={
                     "source": source,
                     "reason": "System in cooldown"
@@ -314,16 +363,31 @@ class FaceDoorSystem:
             }
 
         self.logger.info("Manual open requested from API")
-        send_ok = self.serial_manager.send_command(self.open_command)
+        send_result = self.serial_manager.send_command(self.open_command)
+        send_ok = send_result.get("ok", False)
+        failure_reason = None if send_ok else self.get_serial_failure_reason(
+            send_result,
+            "Door open command could not be sent"
+        )
 
         self.access_logger.write_event(
             event_type="manual_open",
             person_name="admin",
             similarity=0.0,
             result="success" if send_ok else "failed",
+            state_to=self.state_machine.state,
+            door_result="command_sent" if send_ok else "command_failed",
+            failure_reason=failure_reason,
+            source=source,
             extra={
                 "source": source,
-                "command": self.open_command.strip()
+                "command": self.open_command.strip(),
+                "failure_reason": (
+                    failure_reason.get("code") if failure_reason else None
+                ),
+                "message": (
+                    failure_reason.get("message") if failure_reason else None
+                )
             }
         )
 
@@ -344,8 +408,29 @@ class FaceDoorSystem:
         )
         return {
             "success": False,
-            "message": "Serial send failed",
+            "message": failure_reason["code"],
+            "failure_reason": failure_reason,
             "state": self.state_machine.state
+        }
+
+    def get_serial_failure_reason(
+        self,
+        serial_result: Optional[dict] = None,
+        fallback_message: str = "Serial command failed"
+    ) -> dict:
+        if serial_result and serial_result.get("code"):
+            return {
+                "code": serial_result["code"],
+                "message": serial_result.get("message", fallback_message),
+            }
+
+        last_error = getattr(self.serial_manager, "last_error", None)
+        if last_error:
+            return last_error
+
+        return {
+            "code": SerialErrorCode.WRITE_FAILED,
+            "message": fallback_message,
         }
 
     def shutdown(self) -> None:
@@ -376,12 +461,16 @@ def main():
     logger = setup_logger(
         log_dir=log_cfg["log_dir"],
         log_file=log_cfg["system_log_file"],
-        level=log_cfg["level"]
+        level=log_cfg["level"],
+        max_bytes=log_cfg.get("max_bytes", 2 * 1024 * 1024),
+        backup_count=log_cfg.get("backup_count", 5)
     )
 
     access_logger = AccessLogger(
         log_dir=log_cfg["log_dir"],
-        log_file=log_cfg["access_log_file"]
+        log_file=log_cfg["access_log_file"],
+        max_bytes=log_cfg.get("max_bytes", 2 * 1024 * 1024),
+        backup_count=log_cfg.get("backup_count", 5)
     )
 
     logger.info(

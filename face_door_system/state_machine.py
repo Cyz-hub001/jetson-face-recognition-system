@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 
@@ -16,6 +17,9 @@ class StateContext:
     score_count: int = 0
     cooldown_until: float = 0
     last_similarity: float = 0.0
+    last_recognition_name: Optional[str] = None
+    last_recognition_similarity: float = 0.0
+    last_recognition_time: Optional[str] = None
 
 
 class StateMachine:
@@ -59,17 +63,34 @@ class StateMachine:
         similarity_value = (
             self.context.last_similarity if similarity is None else similarity
         )
-        self.logger.info(
+        message = (
             "STATE %s -> %s | reason=%s | person=%s | score_count=%s | "
-            "similarity=%.3f | cooldown_remaining=%.3f",
+            "similarity=%.3f | cooldown_remaining=%.3f"
+        )
+        args = (
             old_state,
             new_state,
             reason,
             self.context.current_person,
             self.context.score_count,
             similarity_value,
-            cooldown_remaining
+            cooldown_remaining,
         )
+        extra = {
+            "event_type": "state_transition",
+            "state_from": old_state,
+            "state_to": new_state,
+            "reason": reason,
+            "person_name": self.context.current_person,
+            "score_count": self.context.score_count,
+            "similarity": round(similarity_value, 3),
+            "cooldown_remaining": round(cooldown_remaining, 3),
+        }
+
+        try:
+            self.logger.info(message, *args, extra=extra)
+        except TypeError:
+            self.logger.info(message, *args)
 
     @property
     def current_person(self) -> Optional[str]:
@@ -89,9 +110,28 @@ class StateMachine:
 
     def record_recognition(self, person_name: str, similarity: float) -> None:
         self.context.last_similarity = similarity
+        self.context.last_recognition_name = person_name
+        self.context.last_recognition_similarity = similarity
+        self.context.last_recognition_time = datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
 
     def is_in_cooldown(self, now: float) -> bool:
         return now < self.context.cooldown_until
+
+    def refresh_cooldown(
+        self,
+        now: float,
+        reason: str = "cooldown_expired"
+    ) -> bool:
+        if self.state != SystemState.COOLDOWN:
+            return False
+
+        if self.is_in_cooldown(now):
+            return False
+
+        self.leave_cooldown(reason=reason, now=now)
+        return True
 
     def get_cooldown_remaining(self, now: Optional[float] = None) -> float:
         if now is None:
@@ -185,6 +225,11 @@ class StateMachine:
             "current_person": self.context.current_person,
             "score_count": self.context.score_count,
             "last_similarity": self.context.last_similarity,
+            "recent_recognition": {
+                "person_name": self.context.last_recognition_name,
+                "similarity": round(self.context.last_recognition_similarity, 3),
+                "timestamp": self.context.last_recognition_time,
+            } if self.context.last_recognition_time else None,
             "in_cooldown": cooldown_remaining > 0,
             "cooldown_remaining": round(cooldown_remaining, 3),
         }

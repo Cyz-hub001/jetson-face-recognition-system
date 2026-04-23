@@ -32,6 +32,7 @@ class DoorSystemService:
                     "serial_enabled": self.system.serial_manager.enabled,
                     "serial_connected": self._is_serial_connected(),
                     "camera_running": self.is_recognition_running(),
+                    "recognition_running": self.is_recognition_running(),
                 }
             )
             return status
@@ -43,6 +44,7 @@ class DoorSystemService:
                 "serial_available": self._is_serial_connected(),
                 "serial_enabled": self.system.serial_manager.enabled,
                 "camera_running": self.is_recognition_running(),
+                "recognition_running": self.is_recognition_running(),
                 "state": self.system.state_machine.state,
                 "service_time": self._service_time(),
             }
@@ -267,6 +269,14 @@ class DoorSystemService:
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     def _parse_system_log_line(self, line: str) -> dict:
+        try:
+            item = json.loads(line)
+            if "timestamp" not in item and "time" in item:
+                item["timestamp"] = item["time"]
+            return item
+        except json.JSONDecodeError:
+            pass
+
         parts = line.split(" | ", 3)
         if len(parts) != 4:
             return {"raw": line}

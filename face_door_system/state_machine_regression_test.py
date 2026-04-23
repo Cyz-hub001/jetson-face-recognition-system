@@ -3,6 +3,8 @@ import os
 import time
 
 import main as app_main
+from access_log import AccessLogger
+from serial_comm import SerialErrorCode
 from services import DoorSystemService
 from state_machine import SystemState
 
@@ -80,7 +82,15 @@ def make_system(log_dir: str, open_score: int, send_ok: bool) -> app_main.FaceDo
     system.state_machine.logger = logger
     system.serial_manager.logger = logger
     system.access_logger = RecordingAccessLogger()
-    system.serial_manager.send_command = lambda command: send_ok
+    if send_ok:
+        send_result = {"ok": True}
+    else:
+        send_result = {
+            "ok": False,
+            "code": SerialErrorCode.NOT_CONNECTED,
+            "message": "Serial port is not open"
+        }
+    system.serial_manager.send_command = lambda command: send_result
     system.start_recognition_engine = lambda: True
     system.stop_recognition_engine = lambda: None
     system.get_recognition_result = lambda: None
@@ -142,6 +152,15 @@ def test_serial_failure_returns_waiting(log_dir: str) -> None:
     assert_true(system.score_count == 0, "score_count should reset after serial failure")
     assert_true(system.current_person is None, "current_person should reset after serial failure")
     assert_true(system.logger.contains("reason=serial_send_failed"), "missing serial failure reason")
+    event = system.access_logger.find_event("serial_send", "failed")
+    assert_true(
+        event["failure_reason"]["code"] == SerialErrorCode.NOT_CONNECTED,
+        "serial failure should keep specific error code"
+    )
+    assert_true(
+        event["extra"]["failure_reason"] == SerialErrorCode.NOT_CONNECTED,
+        "serial failure extra should include code for log statistics"
+    )
 
 
 def test_cooldown_blocks_recognition(log_dir: str) -> None:
@@ -172,6 +191,21 @@ def test_cooldown_expiry_returns_waiting(log_dir: str) -> None:
     assert_true(system.logger.contains("reason=cooldown_expired"), "missing cooldown expiry reason")
 
 
+def test_status_refresh_expires_cooldown(log_dir: str) -> None:
+    system = make_system(log_dir, open_score=3, send_ok=True)
+    system.state_machine.enter_cooldown(
+        cooldown_until=time.time() - 1,
+        reason="test_expired_cooldown",
+        now=time.time() - 2
+    )
+
+    snapshot = system.get_status_snapshot()
+
+    assert_true(snapshot["state"] == SystemState.WAITING, "status should refresh expired cooldown")
+    assert_true(snapshot["in_cooldown"] is False, "expired cooldown should report inactive")
+    assert_true(system.logger.contains("reason=cooldown_expired"), "missing status refresh transition")
+
+
 def test_status_snapshot(log_dir: str) -> None:
     system = make_system(log_dir, open_score=3, send_ok=True)
 
@@ -182,6 +216,10 @@ def test_status_snapshot(log_dir: str) -> None:
     assert_true(snapshot["current_person"] == "Alice", "snapshot current_person mismatch")
     assert_true(snapshot["score_count"] == 1, "snapshot score_count mismatch")
     assert_true(snapshot["last_similarity"] == 0.70, "snapshot similarity mismatch")
+    assert_true(
+        snapshot["recent_recognition"]["person_name"] == "Alice",
+        "snapshot recent recognition name mismatch"
+    )
     assert_true(snapshot["in_cooldown"] is False, "snapshot cooldown mismatch")
 
 
@@ -211,6 +249,27 @@ def test_manual_open_blocked_by_cooldown(log_dir: str) -> None:
     assert_true(event["extra"]["source"] == "api_manual", "blocked manual event should include source")
 
 
+def test_manual_open_serial_failure_returns_code(log_dir: str) -> None:
+    system = make_system(log_dir, open_score=3, send_ok=False)
+
+    result = system.manual_open()
+
+    assert_true(result["success"] is False, "manual open should fail")
+    assert_true(
+        result["message"] == SerialErrorCode.NOT_CONNECTED,
+        "manual open should return serial error code"
+    )
+    assert_true(
+        result["failure_reason"]["code"] == SerialErrorCode.NOT_CONNECTED,
+        "manual open should include structured failure reason"
+    )
+    event = system.access_logger.find_event("manual_open", "failed")
+    assert_true(
+        event["extra"]["failure_reason"] == SerialErrorCode.NOT_CONNECTED,
+        "manual open event should include serial code in extra"
+    )
+
+
 def test_service_status_and_config(log_dir: str) -> None:
     system = make_system(log_dir, open_score=3, send_ok=True)
     service = DoorSystemService(system)
@@ -221,6 +280,7 @@ def test_service_status_and_config(log_dir: str) -> None:
 
     assert_true("serial_enabled" in status, "service status should include serial_enabled")
     assert_true("camera_running" in status, "service status should include camera_running")
+    assert_true("recognition_running" in status, "service status should include recognition_running")
     assert_true(status["owner_name"] == "pyy02", "service status should include owner_name")
     assert_true(status["window_name"] == "Face Door System", "service status should include window_name")
     assert_true("service_time" in status, "service status should include service_time")
@@ -284,6 +344,61 @@ def test_manual_open_local_only_guard(log_dir: str) -> None:
     )
 
 
+def test_access_log_schema_and_rotation(log_dir: str) -> None:
+    log_file = "access_rotation_test.log"
+    base_path = os.path.join(log_dir, log_file)
+    test_paths = [base_path + suffix for suffix in ("", ".1", ".2")]
+
+    def cleanup() -> None:
+        for path in test_paths:
+            if os.path.exists(path):
+                os.remove(path)
+
+    cleanup()
+    try:
+        access_logger = AccessLogger(
+            log_dir=log_dir,
+            log_file=log_file,
+            max_bytes=240,
+            backup_count=2,
+        )
+
+        access_logger.write_event(
+            event_type="open",
+            person_name="Alice",
+            similarity=0.91,
+            result="success",
+            state_from=SystemState.CONFIRMED,
+            state_to=SystemState.OPEN,
+            door_result="opened",
+            source="test",
+        )
+        for index in range(6):
+            access_logger.write_event(
+                event_type="deny",
+                person_name="Unknown",
+                similarity=0.1,
+                result="denied",
+                failure_reason={
+                    "code": "TEST_DENY",
+                    "message": f"deny event {index}"
+                },
+                source="test",
+            )
+
+        assert_true(os.path.exists(base_path), "access log should exist")
+        assert_true(os.path.exists(base_path + ".1"), "access log should rotate")
+
+        with open(base_path, "r", encoding="utf-8") as f:
+            last_record = json.loads(f.read().splitlines()[-1])
+
+        assert_true(last_record["timestamp"], "access event should include timestamp")
+        assert_true(last_record["log_type"] == "access", "access event should include log_type")
+        assert_true("failure_reason" in last_record, "access event should include failure reason")
+    finally:
+        cleanup()
+
+
 def main() -> None:
     tests = [
         test_open_success_enters_cooldown,
@@ -292,16 +407,21 @@ def main() -> None:
         test_serial_failure_returns_waiting,
         test_cooldown_blocks_recognition,
         test_cooldown_expiry_returns_waiting,
+        test_status_refresh_expires_cooldown,
         test_status_snapshot,
         test_manual_open_success_enters_cooldown,
         test_manual_open_blocked_by_cooldown,
+        test_manual_open_serial_failure_returns_code,
         test_service_status_and_config,
         test_service_recognition_loop_start_stop,
         test_service_recognition_loop_start_failure,
         test_manual_open_local_only_guard,
+        test_access_log_schema_and_rotation,
     ]
 
-    base_log_dir = os.path.join(os.path.dirname(__file__), "logs")
+    base_log_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "logs")
+    )
     os.makedirs(base_log_dir, exist_ok=True)
 
     for test in tests:
