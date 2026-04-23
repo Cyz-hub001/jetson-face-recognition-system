@@ -9,6 +9,12 @@ try:
 except ImportError:
     cv2 = None
 
+if cv2 is not None:
+    if not hasattr(cv2, "INTER_NEAREST_EXACT"):
+        cv2.INTER_NEAREST_EXACT = cv2.INTER_NEAREST
+    if not hasattr(cv2, "INTER_LINEAR_EXACT"):
+        cv2.INTER_LINEAR_EXACT = cv2.INTER_LINEAR
+
 try:
     from insightface.app import FaceAnalysis
 except ImportError:
