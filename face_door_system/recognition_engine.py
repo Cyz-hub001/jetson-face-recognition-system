@@ -70,6 +70,12 @@ class RecognitionEngine:
             self._error("insightface is not installed.")
             return False
 
+        self.capture = self._open_camera()
+        if self.capture is None:
+            self._error(f"Failed to open camera: sensor_id={self.camera_sensor_id}")
+            self.stop()
+            return False
+
         try:
             self._prepare_model()
             self._load_known_faces()
@@ -80,12 +86,6 @@ class RecognitionEngine:
 
         if not self.known_embeddings:
             self._warning(f"No known faces loaded from: {self.known_faces_dir}")
-
-        self.capture = self._open_camera()
-        if self.capture is None:
-            self._error(f"Failed to open camera: sensor_id={self.camera_sensor_id}")
-            self.stop()
-            return False
 
         self.running = True
         self._info("Recognition engine started")
