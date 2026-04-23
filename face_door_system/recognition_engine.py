@@ -27,6 +27,7 @@ class RecognitionEngine:
         camera_height: int,
         camera_fps: int,
         camera_backend: str,
+        camera_flip_method: int,
         det_size: tuple,
         model_root: str,
         logger=None
@@ -37,6 +38,7 @@ class RecognitionEngine:
         self.camera_height = camera_height
         self.camera_fps = camera_fps
         self.camera_backend = camera_backend
+        self.camera_flip_method = camera_flip_method
         self.det_size = tuple(det_size)
         self.model_root = Path(os.path.expanduser(model_root))
         self.logger = logger
@@ -128,6 +130,9 @@ class RecognitionEngine:
         )
 
     def _open_camera(self):
+        if str(self.camera_backend or "").lower() == "csi":
+            return self._open_csi_camera()
+
         for backend_name, backend_value in self._camera_backend_candidates():
             capture = cv2.VideoCapture(self.camera_sensor_id, backend_value)
             capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.camera_width)
@@ -148,6 +153,38 @@ class RecognitionEngine:
             )
 
         return None
+
+    def _open_csi_camera(self):
+        pipeline = self._csi_gstreamer_pipeline()
+        capture = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+
+        if capture.isOpened():
+            self._info(
+                f"Camera opened: sensor_id={self.camera_sensor_id}, "
+                "backend=csi"
+            )
+            return capture
+
+        capture.release()
+        self._warning(
+            f"Camera backend failed: sensor_id={self.camera_sensor_id}, "
+            "backend=csi"
+        )
+        self._warning(f"CSI pipeline: {pipeline}")
+        return None
+
+    def _csi_gstreamer_pipeline(self) -> str:
+        return (
+            f"nvarguscamerasrc sensor-id={self.camera_sensor_id} ! "
+            f"video/x-raw(memory:NVMM), width=(int){self.camera_width}, "
+            f"height=(int){self.camera_height}, "
+            f"framerate=(fraction){self.camera_fps}/1 ! "
+            f"nvvidconv flip-method={self.camera_flip_method} ! "
+            "video/x-raw, format=(string)BGRx ! "
+            "videoconvert ! "
+            "video/x-raw, format=(string)BGR ! "
+            "appsink drop=true sync=false max-buffers=1"
+        )
 
     def _camera_backend_candidates(self):
         backend_map = {
