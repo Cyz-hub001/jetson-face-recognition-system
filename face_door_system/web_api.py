@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 import sys
-from typing import Optional
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -47,7 +47,7 @@ class HealthResponse(BaseModel):
 
 
 class LogResponse(BaseModel):
-    items: list[dict] = Field(default_factory=list)
+    items: List[Dict] = Field(default_factory=list)
 
 
 class ManualOpenResponse(BaseModel):
