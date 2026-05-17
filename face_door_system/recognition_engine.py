@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from threading import RLock
 from typing import Optional, Tuple
 
 import numpy as np
@@ -51,6 +52,8 @@ class RecognitionEngine:
         self.capture = None
         self.known_embeddings = []
         self.running = False
+        self._last_frame = None
+        self._frame_lock = RLock()
 
     def start(self) -> bool:
         if self.running:
@@ -97,6 +100,9 @@ class RecognitionEngine:
             self._warning("Camera frame read failed")
             return None
 
+        with self._frame_lock:
+            self._last_frame = frame.copy()
+
         faces = self.app.get(frame)
         if not faces:
             return None
@@ -116,6 +122,12 @@ class RecognitionEngine:
                 best_score = score
 
         return best_name, best_score
+
+    def get_latest_frame(self) -> Optional[np.ndarray]:
+        with self._frame_lock:
+            if self._last_frame is not None:
+                return self._last_frame.copy()
+        return None
 
     def _prepare_model(self) -> None:
         if self.app is not None:

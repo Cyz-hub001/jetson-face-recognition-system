@@ -158,3 +158,34 @@ def start_recognition():
 @app.post("/api/recognition/stop", response_model=RecognitionControlResponse)
 def stop_recognition():
     return get_service().stop_recognition_loop()
+
+
+@app.get("/api/recording/status")
+def get_recording_status():
+    svc = get_service()
+    return {
+        "recording": svc.system.video_recorder.is_recording,
+        "enabled": svc.system.video_recorder.enabled,
+    }
+
+
+@app.get("/api/recording/list")
+def list_recordings():
+    svc = get_service()
+    save_dir = svc.system.video_recorder.save_dir
+    recordings_dir = Path(save_dir)
+    if not recordings_dir.is_absolute() and svc.config_path:
+        recordings_dir = svc.config_path.parent / recordings_dir
+    if not recordings_dir.exists():
+        return {"items": []}
+    files = sorted(recordings_dir.glob("*.mp4"), reverse=True)
+    return {
+        "items": [
+            {
+                "filename": f.name,
+                "size_bytes": f.stat().st_size,
+                "created": datetime.fromtimestamp(f.stat().st_ctime).isoformat(),
+            }
+            for f in files[:100]
+        ]
+    }

@@ -33,6 +33,7 @@ class DoorSystemService:
                     "serial_connected": self._is_serial_connected(),
                     "camera_running": self.is_recognition_running(),
                     "recognition_running": self.is_recognition_running(),
+                    "recording_active": self.system.video_recorder.is_recording,
                 }
             )
             return status
@@ -45,6 +46,7 @@ class DoorSystemService:
                 "serial_enabled": self.system.serial_manager.enabled,
                 "camera_running": self.is_recognition_running(),
                 "recognition_running": self.is_recognition_running(),
+                "recording_active": self.system.video_recorder.is_recording,
                 "state": self.system.state_machine.state,
                 "service_time": self._service_time(),
             }

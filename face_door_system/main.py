@@ -8,6 +8,7 @@ from logger_setup import setup_logger
 from recognition_engine import RecognitionEngine
 from serial_comm import SerialErrorCode, SerialManager
 from state_machine import StateMachine, SystemState
+from video_recorder import VideoRecorder
 
 
 def load_config(config_path: str = "config.json") -> dict:
@@ -89,6 +90,9 @@ class FaceDoorSystem:
             model_root=self.insightface_model_root,
             logger=self.logger
         )
+
+        recording_cfg = config.get("recording", {})
+        self.video_recorder = VideoRecorder(config=recording_cfg, logger=self.logger)
 
     @property
     def score_count(self) -> int:
@@ -242,6 +246,29 @@ class FaceDoorSystem:
         self.state_machine.reset_matching(
             reason="similarity_below_threshold",
             similarity=best_score
+        )
+
+        self._trigger_stranger_recording(best_name, best_score)
+
+    def _trigger_stranger_recording(self, best_name: str, best_score: float) -> None:
+        if self.video_recorder.is_recording:
+            return
+
+        self.logger.info(
+            f"Stranger detected: name={best_name}, similarity={best_score:.3f}, "
+            f"starting video recording"
+        )
+
+        self.access_logger.write_event(
+            event_type="stranger_detected",
+            person_name=best_name,
+            similarity=round(best_score, 3),
+            result="recording_triggered",
+            source="face_recognition"
+        )
+
+        self.video_recorder.start_recording(
+            frame_source=self.recognition_engine.get_latest_frame
         )
 
     def start_recognition_engine(self) -> bool:
@@ -438,6 +465,7 @@ class FaceDoorSystem:
 
     def shutdown(self) -> None:
         self.logger.info("System shutting down...")
+        self.video_recorder.stop()
         self.serial_manager.close()
         self.logger.info("System stopped")
 

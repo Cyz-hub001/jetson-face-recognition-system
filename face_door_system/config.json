@@ -52,5 +52,14 @@
     "allow_manual_open": true,
     "manual_open_local_only": true,
     "auto_start_recognition": false
+  },
+
+  "recording": {
+    "enabled": true,
+    "save_dir": "recordings",
+    "duration": 30,
+    "fps": 20,
+    "codec": "mp4v",
+    "extension": ".mp4"
   }
 }
